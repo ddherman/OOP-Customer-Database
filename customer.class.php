@@ -3,12 +3,19 @@
 class Customer { 
     public $id;
     public $name;
-    public $email;
     public $mobile;
+    public $email;
+    public $password;
+    public $passwordhash;
+    //public $emailConfirmed;
     private $noerrors = true;
+    private $validUserInput = true;
     private $nameError = null;
-    private $emailError = null;
     private $mobileError = null;
+    private $emailError = null;
+    private $passwordError = null;
+    private $entryError = null;
+    //private $emailConfirmationError = null;
     private $title = "Customer";
     private $tableName = "customer";
     
@@ -72,7 +79,7 @@ class Customer {
             $q = $pdo->prepare($sql);
             $q->execute(array($this->name,$this->email,$this->mobile));
             Database::disconnect();
-            header("Location: $this->tableName.php"); // go back to "list"
+            header("Location: $this->tableName.php?fun=display_list");
         }
         else {
             // if not valid data, go back to "create" form, with errors
@@ -81,7 +88,7 @@ class Customer {
         }
     } // end function insert_db_record
     
-    private function select_db_record($id) {
+    function select_db_record($id) {
         $pdo = Database::connect();
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $sql = "SELECT * FROM $this->tableName where id = ?";
@@ -104,7 +111,7 @@ class Customer {
             $q = $pdo->prepare($sql);
             $q->execute(array($this->name,$this->email,$this->mobile,$this->id));
             Database::disconnect();
-            header("Location: $this->tableName.php");
+            header("Location: $this->tableName.php?fun=display_list");
         }
         else {
             $this->noerrors = false;
@@ -119,9 +126,320 @@ class Customer {
         $q = $pdo->prepare($sql);
         $q->execute(array($id));
         Database::disconnect();
-        header("Location: $this->tableName.php");
+        header("Location: $this->tableName.php?fun=display_list");
     } // end function delete_db_record()
     
+    /*
+     * This method logs in the user based on the email and 
+     * password hash in the customers table. If the user is not
+     * found the function will return to the login screen with 
+     * errors.
+     * - Input: user data from Login form
+     * - Processing: SELECT (SQL)
+     * - Output: None (This method does not generate HTML code,
+     *   it only changes the content of the database)
+     * - Precondition: Public variables set (email, password, passwordhash)
+     *   and database connection variables are set in datase.php.
+     * - Postcondition: Entered username and password are found and the create
+     *   screen is displayed (if no errors). Otherwise, the login screen will
+     *   be redisplayed with the proper error message.
+     */
+    function login() {
+        if($_POST) {
+            // Set variables from the Login form
+            $this->email = $_POST['email'];
+            $this->password = $_POST['password'];
+            $this->passwordhash = md5($this->password);
+
+            // Check if the given user exists in the database
+            $pdo = Database::connect();
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $sql = "SELECT * FROM customer WHERE email = '$this->email' AND password_hash = '$this->passwordhash' LIMIT 1";
+            $q = $pdo->prepare($sql);
+            $q->execute(array());
+            $data = $q->fetch(PDO::FETCH_ASSOC);
+            Database::disconnect();
+
+            if($data) {
+                // Set the session array to the user if they exist
+                $_SESSION['email'] = $this->email;
+                //print_r($_SESSION['email']); exit();
+                // Redirect to the table
+                header("Location: $this->tableName.php?fun=display_list");
+            }
+            else {
+                // Given user does not exist so display error message
+                $this->entryError = "Invalid Email or Password";
+            }
+        } 
+        
+        // Generate the Login form
+        $this->createLoginFrom();
+    }// function login()
+    
+    /*
+     * This method generates the html code for the Login 
+     * form.
+     */
+    function createLoginFrom() {
+        //Generate form
+        echo "
+               <!DOCTYPE html>
+               <html lang='en'>
+                   <head>
+                       <meta charset='UTF-8'>
+                       <link href='https://stackpath.bootstrapcdn.com/bootstrap/4.1.2/css/bootstrap.min.css' rel='stylesheet'>
+                       <script src='https://stackpath.bootstrapcdn.com/bootstrap/4.1.2/js/bootstrap.min.js'></script>
+                       <style>label {width: 5em;}</style>
+                   </head>
+
+                   <body>
+                       <div class='container'>
+
+                           <div class='span10 offset2'>
+
+                               <div class='row'>
+                                   <h1>Login</h1>
+                               </div>
+
+                               <form class='form-horizontal' action='$this->tableName.php?fun=login' method='post' enctype='multipart/form-data'>
+
+                                   <div class='from-group'>
+                                       <label class='control-label'>Email</label>
+                                       <input name='email' type='text' placeholder='Email Address' value=''>
+                                   </div>
+
+                                   <div class='from-group'>
+                                       <label class='control-label'>Password</label>
+                                       <input id='password' name='password' type='password'  placeholder='password' value=''>
+                                   </div>
+
+                                   <div class='form-actions'>
+                                       <button type='submit' class='btn btn-success'>Login</button>
+                                       <a class='btn btn-info' href='$this->tableName.php?fun=signup'>Sign Up</a>
+                                   </div>
+
+                                   <div class='form-group"; echo!empty($this->entryError);  echo"? 'error' : '';'>";
+                                   if (!empty($this->entryError)){
+                                               echo"<span class='help-inline'>"; echo $this->entryError; echo"</span>";
+                                   } echo "
+                                   </div>
+
+                               </form>
+
+                           </div> <!-- end div: class='span10 offset1' -->
+
+                       </div> <!-- end div: class='container' -->
+                   </body>
+               </html>
+        ";
+    }
+    
+    /*
+     * This method adds a new user to the database with the entered
+     * name, mobile number, email, and password.
+     * - Input: user data from Signup form
+     * - Processing: SELECT, INSERT (SQL)
+     * - Output: None (This method does not generate HTML code,
+     *   it only changes the content of the database)
+     * - Precondition: Public variables set (name, email, mobile, password, 
+     *   passwordhash), database connection variables are set in datase.php, and 
+     *   enterd information passes all validation checks (ex: given email doesn't
+     *   already exist).
+     * - Postcondition: The entered information is added to the table, a new 
+     *   user account is created that can be logged in with, and the user
+     *   is redirected to the login form (if data is valid). Otherwise, the
+     *   signup form is redisplayed with the proper error messages.  
+     */
+    function signup() {
+        if(!empty($_POST)) { // if not first time through
+            // Set variables from the Signup form
+            $this->validUserInput = true;
+            $this->name = $_POST['name'];
+            $this->email = $_POST['email'];
+            $this->mobile = $_POST['mobile'];
+            $this->password = $_POST['password'];
+            $this->passwordhash = MD5($this->password);
+
+            // validate user input
+            // Check if the name field is empty
+            if(empty($this->name)) {
+                $this->nameError = 'Please enter your Full Name';
+                $this->validUserInput = false;
+            }
+            // Check if the email field is empty
+            if(empty($this->email)) {
+                $this->emailError = 'Please enter valid Email Address';
+                $this->validUserInput = false;
+            }
+            // Check if the format of the entered email is valid
+            else if(!filter_var($this->email, FILTER_VALIDATE_EMAIL)) {
+                $this->emailError = 'Please enter a valid Email Address';
+                $this->validUserInput = false;
+            }
+            
+            // Check if the entered email already exists in the database
+            $pdo = Database::connect();
+            $sql = "SELECT * FROM customer";
+            foreach ($pdo->query($sql) as $row) {
+                if ($this->email == $row['email']) {
+                    $this->emailError = 'Email has already been registered';
+                    $this->validUserInput = false;
+                }
+            }
+            Database::disconnect();
+            
+            // Check that the email only contains lowercase letters
+            if (strcmp(strtolower($this->email),$this->email)!=0) {
+                    $this->emailError = 'email address can contain only lower case letters';
+                    $this->validUserInput = false;
+            }
+            // Check if the mobile field is empty
+            if (empty($this->mobile)) {
+                $this->mobileError = 'Please enter Mobile Number (or "none")';
+                $this->validUserInput = false;
+            }
+            // Check that the entered mobile number follows the format 000-000-0000
+            if (!preg_match("/^[0-9]{3}-[0-9]{3}-[0-9]{4}$/", $this->mobile)) {
+                $this->mobileError = 'Please write Mobile Number in form 000-000-0000';
+                $this->validUserInput = false;
+            }
+            // Check if the password field is empty
+            if (empty($this->password)) {
+                $this->passwordError = 'Please enter valid Password';
+                $this->validUserInput = false;
+            }
+
+            // Inser the new user into the database
+            if ($this->validUserInput) {
+                $pdo = Database::connect();
+                $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                $sql = "INSERT INTO customer (name,email,mobile,password_hash) values(?, ?, ?, ?)";
+                $q = $pdo->prepare($sql);
+                $q->execute(array($this->name, $this->email, $this->mobile, $this->passwordhash));
+
+                $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                $sql = "SELECT * FROM customer WHERE email = ? AND password_hash = ? LIMIT 1";
+                $q = $pdo->prepare($sql);
+                $q->execute(array($this->email, $this->passwordhash));
+                $data = $q->fetch(PDO::FETCH_ASSOC);
+                Database::disconnect();
+                
+                //$this->sendEmailConfirmation();
+                // Redirect to the Login Form
+                header("Location: $this->tableName.php?fun=login");
+            }
+        }
+        
+        // Generate the Signup form
+        $this->createSignupForm();
+    }// function signup() {
+    
+    /*
+     * This method generates the html code for the signup 
+     * form.
+     */
+    function createSignupForm() {
+        echo "<!DOCTYPE html>
+            <html lang='en'>
+                <head>
+                    <meta charset='UTF-8'>
+                    <link href='https://stackpath.bootstrapcdn.com/bootstrap/4.1.2/css/bootstrap.min.css' rel='stylesheet'>
+                    <script src='https://stackpath.bootstrapcdn.com/bootstrap/4.1.2/js/bootstrap.min.js'></script>
+                    <style>label {width: 8em;}</style>
+                </head>
+
+            <body>
+                <div class='container'>
+
+                    <div class='span10 offset2'>
+
+                            <div class='row'>
+                                    <h1>Customer Sign Up</h1>
+                            </div>
+
+                            <form class='form-horizontal' action='$this->tableName.php?fun=signup' method='post' enctype='multipart/form-data'>";
+
+                                echo "<div class='form-group "; echo!empty($this->nameError);  echo"? 'error' : '';'>";
+                                        echo "<label class='control-label'>Full Name</label>
+                                        <input name='name' type='text' placeholder='Full Name' value='"; echo !empty($this->name)?$this->name:''; echo "'>
+                                        "; if (!empty($this->nameError)){
+                                                echo "<span class='help-inline'>" . $this->nameError . "</span>";
+                                           } echo "
+                                </div>";
+                                           
+                                echo "<div class='form-group "; echo!empty($this->mobileError);  echo"? 'error' : '';'>";
+                                        echo "<label class='control-label'>Mobile Number</label>
+                                        <input name='mobile' type='text' placeholder='Mobile Phone Number' value='"; echo !empty($this->mobile)?$this->mobile:''; echo "'>
+                                        "; if (!empty($this->mobileError)){
+                                                echo "<span class='help-inline'>" . $this->mobileError . "</span>";
+                                           } echo "
+                                </div>";
+
+                                echo "<div class='form-group "; echo !empty($this->emailError);  echo"? 'error' : '';'>";
+                                        echo "<label class='control-label'>Email</label>
+                                        <input name='email' type='text' placeholder='Email Address' value='"; echo !empty($this->email)?$this->email:''; echo "'>
+                                        "; if (!empty($this->emailError)){
+                                                echo "<span class='help-inline'>" . $this->emailError . "</span>";
+                                           } echo "
+                                </div>";
+
+                                echo "<div class='form-group "; echo!empty($this->passwordError);  echo"? 'error' : '';'>";
+                                        echo "<label class='control-label'>Password</label>
+                                        <input name='password' type='password' placeholder='Password' value='"; echo !empty($this->password)?$this->password:''; echo "'>
+                                        "; if (!empty($this->passwordError)){
+                                                echo "<span class='help-inline'>" . $this->passwordError . "</span>";
+                                           } echo "
+                                </div>";
+
+                                echo "<div class='form-actions'>
+                                    <button type='submit' class='btn btn-success'>Sign Up</button>
+                                    <a class='btn btn-secondary' href='$this->tableName.php?fun=login'>Back</a>
+                                </div>
+                        </form>
+
+                    </div>
+
+                </div>
+            </body>
+            </html>";
+    }
+    
+    /*function sendEmailConfirmation() {
+        ini_set('SMTP', 'smtp.gmail.com');
+        ini_set('smtp_port', '587');
+        
+        $to      = $this->email;
+        $subject = 'prog03 Email Confirmation';
+        $message = 'Before you can login you must first confirm your email.\n'
+                    . '\n' 
+                    . 'Click here to confirm your email:\n'
+                    . 'http://localhost/prog03/customer.php?=confirmation';
+        
+        $status = mail($to, $subject, $message);
+        
+       echo $status; exit();
+    }*/
+    
+    /*
+     * This method logs out the current user by destroying the current session.
+     * - Input: none
+     * - Processing: none
+     * - Output: none
+     * - Precondition: A user has logged in the $_SESSION array has be set.
+     * - Postcondition: The current users session will be destroyed and the 
+     *   $_SESSION array cleared, sending the user back to the Login form.  
+     */
+    function logout() {
+        session_unset();
+        session_destroy();
+        header("Location: $this->tableName.php");
+    }
+    
+    /*
+     * This funtion dispalys the html for the title and sets the $fun variable
+     * for the given form. Allows customer.php to navigate to the proper form.
+     */
     private function generate_html_top ($fun, $id=null) {
         switch ($fun) {
             case 1: // create
@@ -165,6 +483,9 @@ class Customer {
                     ";
     } // end function generate_html_top()
     
+    /*
+     * This fcuntion generates the html code for the buttons on the given form.
+     */
     private function generate_html_bottom ($fun) {
         switch ($fun) {
             case 1: // create
@@ -187,7 +508,7 @@ class Customer {
         echo " 
                             <div class='form-actions'>
                                 $funButton
-                                <a class='btn btn-secondary' href='$this->tableName.php'>Back</a>
+                                <a class='btn btn-secondary' href='$this->tableName.php?fun=display_list'>Back</a>
                             </div>
                         </form>
                     </div>
@@ -198,6 +519,10 @@ class Customer {
                     ";
     } // end function generate_html_bottom()
     
+    /*
+     * This function generates the required html form groups for the given form
+     * (Labels, Inputs, Errors).
+     */
     private function generate_form_group ($label, $labelError, $val, $modifier="") {
         echo "<div class='form-group'";
         echo !empty($labelError) ? ' alert alert-danger ' : '';
@@ -221,20 +546,27 @@ class Customer {
         echo "</div>"; // end div: class='form-group'
     } // end function generate_form_group()
     
+    /*
+     * This fcuntion checks if all fields (name, email, mobile) are valid.
+     */
     private function fieldsAllValid () {
         $valid = true;
+        // Check if the name field is empty
         if (empty($this->name)) {
             $this->nameError = 'Please enter Name';
             $valid = false;
         }
+        // Check if the email field is empty
         if (empty($this->email)) {
             $this->emailError = 'Please enter Email Address';
             $valid = false;
         } 
+        // Check if the format of the entered email is valid
         else if ( !filter_var($this->email,FILTER_VALIDATE_EMAIL) ) {
             $this->emailError = 'Please enter a valid email address: me@mydomain.com';
             $valid = false;
         }
+        // Check if the mobile field is empty
         if (empty($this->mobile)) {
             $this->mobileError = 'Please enter Mobile phone number';
             $valid = false;
@@ -242,6 +574,9 @@ class Customer {
         return $valid;
     } // end function fieldsAllValid() 
     
+    /*
+     * This fucntion displays the table.
+     */
     function list_records() {
         echo "<!DOCTYPE html>
         <html>
@@ -256,13 +591,18 @@ class Customer {
         echo "
             </head>
             <body>
-                <a href='https://github.com/cis355/PhpProject1' target='_blank'>Github</a><br />
+                <a href='https://github.com/ddherman/OOP-Customer-Database'>Github</a><br/>
+                <a href='http://csis.svsu.edu/~ddherman/prog03/uml02.png'>prog02 UML Diagram</a><br/>
+                <a href='http://csis.svsu.edu/~ddherman/prog03/screenflow02.png'>prog02 Screen Flow Diagram</a><br/>
+                <a href='http://csis.svsu.edu/~ddherman/prog03/uml03.png'>prog03 UML Diagram</a><br/>
+                <a href='http://csis.svsu.edu/~ddherman/prog03/screenflow03.png'>prog03 Screen Flow Diagram</a><br/>
                 <div class='container'>
                     <p class='row'>
                         <h3>$this->title" . "s" . "</h3>
                     </p>
                     <p>
                         <a href='$this->tableName.php?fun=display_create_form' class='btn btn-success'>Create</a>
+                        <a href='$this->tableName.php?fun=logout' class='btn btn-secondary'>Log Out</a>
                     </p>
                     <div class='row'>
                         <table class='table table-striped table-bordered'>
